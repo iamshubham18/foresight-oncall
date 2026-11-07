@@ -29,11 +29,26 @@ REFLECT_MISSION = (
 )
 
 
+# Relevance gate. Unset = no filtering. Pick a value with `python -m scripts.probe_scores`.
+RECALL_MIN_RERANKER = os.getenv("RECALL_MIN_RERANKER", "").strip()
+MAX_MEMORIES = int(os.getenv("RECALL_MAX_MEMORIES", "8"))
+
+
 @dataclass
 class Memory:
     id: str
     text: str
     kind: str = ""
+    doc_id: str = ""        # source incident, e.g. INC-0388
+    score: float | None = None
+    date: str = ""
+
+    @property
+    def source(self) -> str:
+        """Group key: raw facts group by incident; Hindsight's own summaries are 'learned-pattern'."""
+        if self.kind == "observation":
+            return "learned-pattern"
+        return self.doc_id or "other"
 
 
 def get_client() -> Hindsight:
@@ -68,14 +83,26 @@ def retain(content: str, context: str, tags=None, document_id=None, client=None)
              tags=tags or [], document_id=document_id)
 
 
-def recall(query: str, max_tokens: int = 2048, client=None) -> list:
+def recall(query: str, max_tokens: int = 1500, client=None, limit: int | None = None) -> list:
+    """Recall relevant memories, with provenance (source incident) and a relevance score."""
     c = client or get_client()
-    res = c.recall(bank_id=BANK_ID, query=query, max_tokens=max_tokens)
+    kwargs = dict(bank_id=BANK_ID, query=query, max_tokens=max_tokens)
+    if RECALL_MIN_RERANKER:
+        # Hindsight abstains on weak matches when a reranker floor is set
+        kwargs["min_scores"] = {"reranker": float(RECALL_MIN_RERANKER)}
+    res = c.recall(**kwargs)
     out = []
     for r in res.results:
+        sc = getattr(r, "scores", None)
+        score = None
+        if sc is not None:
+            score = sc.reranker if sc.reranker is not None else sc.final
+        when = getattr(r, "occurred_start", None)
         out.append(Memory(id=str(getattr(r, "id", "")), text=r.text,
-                          kind=str(getattr(r, "type", "") or "")))
-    return out
+                          kind=str(getattr(r, "type", "") or ""),
+                          doc_id=str(getattr(r, "document_id", "") or ""),
+                          score=score, date=str(when)[:10] if when else ""))
+    return out[: (limit or MAX_MEMORIES)]
 
 
 def reflect(query: str, client=None):

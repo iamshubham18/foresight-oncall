@@ -1,4 +1,6 @@
 """Foresight: the on-call copilot that remembers every outage (Streamlit UI)."""
+import html
+
 import streamlit as st
 
 from data.demo_alerts import DEMO_ALERTS
@@ -73,9 +75,15 @@ if res:
             st.markdown('<div class="nomem">Hindsight returned nothing relevant. The agent was told to say so rather than guess.</div>',
                         unsafe_allow_html=True)
         else:
-            st.caption(f"{len(res.memories)} memories recalled by Hindsight")
-            for m in res.memories[:8]:
-                st.markdown(f'<div class="mem">{m.text}</div>', unsafe_allow_html=True)
+            groups: dict = {}
+            for m in res.memories:
+                groups.setdefault(m.source, []).append(m)
+            st.caption(f"{len(res.memories)} memories from {len(groups)} source incident(s), best matches first")
+            for doc, ms in groups.items():
+                scores = [m.score for m in ms if m.score is not None]
+                head = ("Learned pattern (consolidated by Hindsight)" if doc == "learned-pattern" else html.escape(doc)) + (f" · relevance {max(scores):.2f}" if scores else "")
+                facts = "<br>".join("• " + html.escape(m.text) for m in ms)
+                st.markdown(f'<div class="mem"><b>{head}</b><br>{facts}</div>', unsafe_allow_html=True)
 
     # ---------- feedback loop ----------
     st.divider()

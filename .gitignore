@@ -16,4 +16,6 @@ venv/
 .DS_Store
 
 # Private notes
-_internal/
+_internal/hindsight.env
+.seed_done.json
+hindsight.env
